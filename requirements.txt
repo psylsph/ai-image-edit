@@ -1,0 +1,12 @@
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+gradio>=4.15.0
+pillow>=10.2.0
+numpy>=1.26.3
+torch>=2.1.2
+torchvision>=0.16.2
+huggingface_hub>=0.20.0
+opencv-python-headless>=4.9.0
+timm>=0.9.12
+rembg>=2.0.50
+onnxruntime>=1.23.0
