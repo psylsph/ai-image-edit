@@ -2,12 +2,37 @@ version: '3.8'
 
 services:
   ai-image-edit:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-image-edit
     ports:
-      - "8000:8000"
-    restart: unless-stopped
+      - "8000:8000"  # Main application
+      - "9090:9090"  # Metrics endpoint
+    environment:
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - MAX_IMAGE_SIZE_MB=10
+      - MAX_IMAGE_DIMENSION=1536
+      - ENABLE_METRICS=true
+      - METRICS_PORT=9090
+      - RATE_LIMIT_REQUESTS=10
+      - RATE_LIMIT_PERIOD=60
     volumes:
-      - ai-image-edit-cache:/root/.cache/ai-image-edit
+      # Persist model cache
+      - model-cache:/root/.cache/ai-image-edit
+      # Persist temp directory
+      - temp-data:/tmp/ai-image-edit
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; r=urllib.request.urlopen('http://localhost:8000/health'); assert r.status==200"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 volumes:
-  ai-image-edit-cache:
+  model-cache:
+    driver: local
+  temp-data:
+    driver: local
