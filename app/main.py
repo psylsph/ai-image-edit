@@ -313,9 +313,8 @@ def create_fastapi_app():
     )
 
     @app.get("/health")
-    @limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
     async def health_check():
-        """Health check endpoint."""
+        """Health check endpoint (no rate limiting)."""
         return {
             "status": "healthy",
             "message": "AI Image Editor is running",
