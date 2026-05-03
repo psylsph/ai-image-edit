@@ -38,8 +38,8 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: Optional[str] = None
     
     # File storage
-    TEMP_DIR: str = "/app/temp"
-    CACHE_DIR: str = "/app/models/cache"
+    TEMP_DIR: str = "/tmp/ai-image-edit"
+    CACHE_DIR: str = "/tmp/ai-image-edit/cache"
     
     # Logging
     LOG_LEVEL: str = "INFO"

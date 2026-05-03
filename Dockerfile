@@ -40,12 +40,10 @@ COPY --from=model-downloader /root/.cache/ai-image-edit /root/.cache/ai-image-ed
 # Copy application code
 COPY . /home/app/
 
-# Create non-root user
+# Create non-root user and set up temp directory
 RUN useradd --create-home --shell /bin/bash appuser && \
-    chown -R appuser:appuser /home/app
-
-# Create temp directory
-RUN mkdir -p /tmp/ai-image-edit && \
+    chown -R appuser:appuser /home/app && \
+    mkdir -p /tmp/ai-image-edit && \
     chown -R appuser:appuser /tmp/ai-image-edit
 
 USER appuser

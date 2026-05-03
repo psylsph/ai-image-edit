@@ -19,7 +19,7 @@ services:
       - RATE_LIMIT_REQUESTS=10
       - RATE_LIMIT_PERIOD=60
     volumes:
-      # Persist model cache
+      # Persist model cache (downloaded in Dockerfile)
       - model-cache:/root/.cache/ai-image-edit
       # Persist temp directory
       - temp-data:/tmp/ai-image-edit
