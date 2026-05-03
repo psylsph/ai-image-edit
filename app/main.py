@@ -303,15 +303,7 @@ def create_fastapi_app():
         allow_headers=["*"],
     )
 
-    gradio_app = create_gradio_app()
-
-    app = gr.mount_gradio_app(
-        app,
-        gradio_app,
-        path="/",
-        favicon_path=None
-    )
-
+    # Define FastAPI routes BEFORE mounting Gradio
     @app.get("/health")
     async def health_check():
         """Health check endpoint (no rate limiting)."""
@@ -321,7 +313,7 @@ def create_fastapi_app():
             "device": device_info,
             "version": settings.APP_VERSION
         }
-    
+
     @app.get("/presets")
     async def list_presets():
         """List available presets."""
@@ -335,6 +327,15 @@ def create_fastapi_app():
                 for name, preset in PRESETS.items()
             ]
         }
+
+    # Mount Gradio app at root path
+    gradio_app = create_gradio_app()
+    app = gr.mount_gradio_app(
+        app,
+        gradio_app,
+        path="/",
+        favicon_path=None
+    )
 
     return app
 
