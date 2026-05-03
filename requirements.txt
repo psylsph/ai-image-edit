@@ -10,3 +10,19 @@ opencv-python-headless>=4.9.0
 timm>=0.9.12
 rembg>=2.0.50
 onnxruntime>=1.23.0
+
+# Phase 1 Critical Fixes
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+slowapi>=0.1.9
+python-multipart>=0.0.6
+
+# Phase 2 Performance
+redis>=5.0.0
+celery>=5.3.0
+
+# Phase 3 UX
+pillow-heif>=0.13.0  # HEIC support
+
+# Phase 4 Monitoring
+prometheus-client>=0.19.0

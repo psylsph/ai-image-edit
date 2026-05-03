@@ -1,12 +1,45 @@
 import tempfile
+import os
 from pathlib import Path
 from PIL import Image
 import gradio as gr
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+import logging
 
 from app.pipeline import process_pipeline
+from app.models import ProcessRequest, PRESETS
+from app.exceptions import ImageProcessingError, FileSizeError, ValidationError
+from app.config import settings
 from models.model_downloader import get_device_string
+
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL),
+    format=settings.LOG_FORMAT
+)
+logger = logging.getLogger(__name__)
+
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address)
+
+
+def validate_image_size(image: Image.Image) -> None:
+    """Validate image size constraints."""
+    # Check file size (approximate from PIL Image)
+    import io
+    buffer = io.BytesIO()
+    image.save(buffer, format='PNG')
+    size_mb = len(buffer.getvalue()) / (1024 * 1024)
+    
+    if size_mb > settings.MAX_IMAGE_SIZE_MB:
+        raise FileSizeError(size_mb, settings.MAX_IMAGE_SIZE_MB)
+    
+    logger.info(f"Image size validated: {size_mb:.2f}MB")
 
 
 def process_image_handler(
@@ -20,17 +53,33 @@ def process_image_handler(
 ):
     """Handle image processing request from Gradio."""
     if image is None:
-        return None, None, None, None, None, "Please upload an image first."
-
+        return None, None, None, None, None, "⚠️ Please upload an image first."
+    
     try:
-        result = process_pipeline(
-            image,
+        # Validate input
+        request = ProcessRequest(
             enable_background_blur=enable_background_blur,
             blur_strength=blur_strength,
             enable_grain=enable_grain,
             grain_intensity=grain_intensity,
             enable_upscale=enable_upscale,
-            upscale_factor=upscale_factor,
+            upscale_factor=upscale_factor
+        )
+        
+        # Validate image size
+        validate_image_size(image)
+        
+        logger.info(f"Processing image: {image.size}, settings: {request.model_dump()}")
+        
+        # Process pipeline
+        result = process_pipeline(
+            image,
+            enable_background_blur=request.enable_background_blur,
+            blur_strength=request.blur_strength,
+            enable_grain=request.enable_grain,
+            grain_intensity=request.grain_intensity,
+            enable_upscale=request.enable_upscale,
+            upscale_factor=request.upscale_factor,
             debug=True
         )
 
@@ -41,16 +90,27 @@ def process_image_handler(
 
         temp_file = None
         if final_image:
-            temp_dir = tempfile.gettempdir()
+            temp_dir = settings.TEMP_DIR
+            os.makedirs(temp_dir, exist_ok=True)
             temp_file = Path(temp_dir) / f"processed_{id(final_image)}.png"
             final_image.save(temp_file, "PNG")
 
-        status = "Processing complete!"
+        status = "✅ Processing complete!"
+        logger.info(f"Successfully processed image: {temp_file}")
 
         return final_image, temp_file, bg_mask, grain_result, upscale_result, status
 
+    except FileSizeError as e:
+        logger.error(f"File size error: {e.message}")
+        return None, None, None, None, None, f"❌ {e.message}\n💡 {e.suggestion}"
+    
+    except ValidationError as e:
+        logger.error(f"Validation error: {e.message}")
+        return None, None, None, None, None, f"❌ {e.message}\n💡 {e.suggestion}"
+    
     except Exception as e:
-        error_msg = f"Error: {str(e)}"
+        logger.error(f"Processing error: {str(e)}", exc_info=True)
+        error_msg = f"❌ Error: {str(e)}\n\n💡 Try:\n• Using a smaller image\n• Reducing processing steps\n• Different settings"
         return None, None, None, None, None, error_msg
 
 
@@ -79,34 +139,35 @@ def create_gradio_app():
         .gr-button { width: 100% !important; }
     }
     """
+    
     with gr.Blocks(title="AI Image Editor", css=css) as demo:
-        gr.Markdown(f"# AI Image Editor ({device_info})", elem_classes=["title"])
+        gr.Markdown(f"# 🎨 AI Image Editor ({device_info})", elem_classes=["title"])
 
         with gr.Row(equal_height=False):
             with gr.Column(min_width=280, scale=1):
                 input_image = gr.Image(
                     sources=["upload", "clipboard"],
                     type="pil",
-                    label="Upload Image",
+                    label="📁 Upload Image",
                     elem_classes=["input-image"],
                     height=280
                 )
 
                 with gr.Group(elem_classes=["gr-group"]):
-                    gr.Markdown("### Processing Options")
+                    gr.Markdown("### ⚙️ Processing Options")
 
                     with gr.Row():
                         bg_blur = gr.Checkbox(
                             value=True,
-                            label="Background Blur",
+                            label="🌫️ Background Blur",
                             elem_classes=["gr-checkbox"]
                         )
                         bg_strength = gr.Slider(
                             minimum=1,
-                            maximum=20,
+                            maximum=50,
                             value=5,
                             step=1,
-                            label="Blur",
+                            label="Blur Strength",
                             elem_classes=["gr-slider"],
                             show_label=True
                         )
@@ -114,7 +175,7 @@ def create_gradio_app():
                     with gr.Row():
                         grain = gr.Checkbox(
                             value=True,
-                            label="Film Grain",
+                            label="🎬 Film Grain",
                             elem_classes=["gr-checkbox"]
                         )
                         grain_intensity = gr.Slider(
@@ -130,7 +191,7 @@ def create_gradio_app():
                     with gr.Row():
                         upscale = gr.Checkbox(
                             value=True,
-                            label="Upscaling",
+                            label="🔍 Upscaling",
                             elem_classes=["gr-checkbox"]
                         )
                         upscale_factor = gr.Radio(
@@ -142,7 +203,7 @@ def create_gradio_app():
                         )
 
                 submit_btn = gr.Button(
-                    "Process Image",
+                    "🚀 Process Image",
                     variant="primary",
                     size="lg",
                     elem_classes=["gr-button"]
@@ -152,7 +213,7 @@ def create_gradio_app():
 
             with gr.Column(min_width=300, scale=2):
                 with gr.Tabs(elem_classes=["gr-tabs"]):
-                    with gr.Tab("Final Output", elem_id="tab-final"):
+                    with gr.Tab("✨ Final Output", elem_id="tab-final"):
                         output_image = gr.Image(
                             type="pil",
                             label="Processed Image",
@@ -160,13 +221,13 @@ def create_gradio_app():
                             height=400
                         )
                         download_btn = gr.DownloadButton(
-                            "Download Image",
+                            "💾 Download Image",
                             value=None,
                             variant="secondary",
                             elem_classes=["gr-button"]
                         )
 
-                    with gr.Tab("Background", elem_id="tab-bg"):
+                    with gr.Tab("🌫️ Background", elem_id="tab-bg"):
                         debug_bg = gr.Image(
                             type="pil", 
                             label="Background Mask", 
@@ -174,7 +235,7 @@ def create_gradio_app():
                             height=400
                         )
 
-                    with gr.Tab("Grain", elem_id="tab-grain"):
+                    with gr.Tab("🎬 Grain", elem_id="tab-grain"):
                         debug_grain = gr.Image(
                             type="pil", 
                             label="After Film Grain", 
@@ -182,7 +243,7 @@ def create_gradio_app():
                             height=400
                         )
 
-                    with gr.Tab("Upscaled", elem_id="tab-upscale"):
+                    with gr.Tab("🔍 Upscaled", elem_id="tab-upscale"):
                         debug_upscale = gr.Image(
                             type="pil", 
                             label="After Upscaling", 
@@ -191,12 +252,17 @@ def create_gradio_app():
                         )
 
         gr.Markdown(f"""
-        ### About
+        ### ℹ️ About
         AI image processing on {device_info}.
-
-        - **Background Blur**: BiRefNet foreground/background separation
-        - **Film Grain**: Luminance-aware grain effect
-        - **Upscaling**: Real-ESRGAN 2×/4× enlargement
+        
+        **Features:**
+        - 🌫️ **Background Blur**: BiRefNet foreground/background separation
+        - 🎬 **Film Grain**: Luminance-aware grain effect
+        - 🔍 **Upscaling**: Real-ESRGAN 2×/4× enlargement
+        
+        **Limits:**
+        - Max file size: {settings.MAX_IMAGE_SIZE_MB:.0f}MB
+        - Max dimension: {settings.MAX_IMAGE_DIMENSION}px
         """, elem_classes=["gr-markdown"])
 
         submit_btn.click(
@@ -213,16 +279,6 @@ def create_gradio_app():
             ]
         )
 
-        gr.Markdown(f"""
-        ### About
-        This is an AI image processing tool running on {device_info}. 
-        Processing times may vary depending on your hardware.
-        
-        - **Background Blur**: Uses BiRefNet for foreground/background separation
-        - **Film Grain**: Adds authentic film grain effect
-        - **Upscaling**: Uses Real-ESRGAN for image enlargement
-        """)
-
     return demo
 
 
@@ -234,10 +290,14 @@ def create_fastapi_app():
         description=f"AI image processing API running on {device_info}",
         version="1.0.0"
     )
+    
+    # Add rate limit exception handler
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=settings.cors_origins_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -253,8 +313,29 @@ def create_fastapi_app():
     )
 
     @app.get("/health")
+    @limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
     async def health_check():
-        return {"status": "healthy", "message": "AI Image Editor is running", "device": device_info}
+        """Health check endpoint."""
+        return {
+            "status": "healthy",
+            "message": "AI Image Editor is running",
+            "device": device_info,
+            "version": settings.APP_VERSION
+        }
+    
+    @app.get("/presets")
+    async def list_presets():
+        """List available presets."""
+        return {
+            "presets": [
+                {
+                    "name": name,
+                    "description": preset.description,
+                    "settings": preset.settings.model_dump()
+                }
+                for name, preset in PRESETS.items()
+            ]
+        }
 
     return app
 
@@ -266,8 +347,8 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=False,
+        host=settings.HOST,
+        port=settings.PORT,
+        reload=settings.DEBUG,
         workers=1
     )
