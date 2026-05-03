@@ -18,7 +18,7 @@ RUN wget -q -O /root/.cache/ai-image-edit/realesrgan/RealESRGAN_x4plus.pth \
 FROM python:3.11-slim
 
 EXPOSE 8000
-EXPOSE 9090  # Metrics port
+EXPOSE 9090
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
