@@ -67,10 +67,25 @@ def process_background(
         mask_colored = Image.merge('RGB', [mask_pil, mask_pil, mask_pil])
 
     original_rgba = image.convert('RGBA')
-    blurred = original_rgba.filter(ImageFilter.GaussianBlur(radius=blur_strength))
-
-    binary_mask = mask_pil.point(lambda x: 255 if x > 10 else 0)
-    result_rgba = Image.composite(original_rgba, blurred, binary_mask)
+    
+    # rembg returns the image with background REMOVED (transparent)
+    # We need to use this for the sharp foreground
+    foreground_with_alpha = mask_image.convert('RGBA').resize(original_size, Image.LANCZOS)
+    
+    # Create binary mask from the alpha channel
+    alpha_channel = foreground_with_alpha.split()[-1]  # Get alpha channel
+    binary_mask = alpha_channel.point(lambda x: 255 if x > 128 else 0)
+    
+    # Feather the mask for smooth edges
+    soft_mask = binary_mask.filter(ImageFilter.GaussianBlur(radius=3))
+    
+    # Blur the entire original image (background gets blurred)
+    blurred_image = original_rgba.filter(ImageFilter.GaussianBlur(radius=blur_strength))
+    
+    # Composite: 
+    # - Where soft_mask is 255 (foreground), use the background-removed (sharp) image
+    # - Where soft_mask is 0 (background), use the blurred image
+    result_rgba = Image.composite(foreground_with_alpha, blurred_image, soft_mask)
 
     foreground_pil = result_rgba.convert('RGB' if image.mode == 'RGB' else image.mode)
 
