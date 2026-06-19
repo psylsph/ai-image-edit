@@ -2,7 +2,7 @@ from typing import Optional
 
 from PIL import Image
 
-from .background import process_background
+from .background import process_background, BG_MODELS
 from .grain import apply_film_grain
 from .upscale import upscale_image
 
@@ -35,6 +35,8 @@ def process_pipeline(
     image: Image.Image,
     enable_background_blur: bool = True,
     blur_strength: int = 15,
+    bg_model: str = "u2net",
+    bg_mode: str = "blur",
     enable_grain: bool = True,
     grain_intensity: float = 0.5,
     enable_upscale: bool = True,
@@ -45,7 +47,7 @@ def process_pipeline(
 
     Processing order:
     1. Pre-process (resize to <=1536px)
-    2. Background Blur (optional)
+    2. Background Blur/Remove (optional)
     3. Film Grain (optional)
     4. Upscaling (optional)
 
@@ -53,6 +55,8 @@ def process_pipeline(
         image: Input PIL Image
         enable_background_blur: Enable background blur stage
         blur_strength: Blur strength (1-50)
+        bg_model: Background removal model (see BG_MODELS)
+        bg_mode: "blur" or "remove"
         enable_grain: Enable film grain stage
         grain_intensity: Grain intensity (0.1-1.0)
         enable_upscale: Enable upscaling stage
@@ -83,7 +87,7 @@ def process_pipeline(
     current_grain_only = None
 
     if enable_background_blur:
-        current_image, current_debug_bg = process_background(current_image, blur_strength)
+        current_image, current_debug_bg = process_background(current_image, blur_strength, bg_model, bg_mode)
         if debug:
             result['bg_result'] = current_image
             result['bg_mask'] = current_debug_bg
@@ -108,6 +112,8 @@ def process_image_simple(
     image: Image.Image,
     enable_background_blur: bool = True,
     blur_strength: int = 15,
+    bg_model: str = "u2net",
+    bg_mode: str = "blur",
     enable_grain: bool = True,
     grain_intensity: float = 0.5,
     enable_upscale: bool = True,
@@ -119,6 +125,8 @@ def process_image_simple(
         image: Input PIL Image
         enable_background_blur: Enable background blur stage
         blur_strength: Blur strength (1-50)
+        bg_model: Background removal model (see BG_MODELS)
+        bg_mode: "blur" or "remove"
         enable_grain: Enable film grain stage
         grain_intensity: Grain intensity (0.1-1.0)
         enable_upscale: Enable upscaling stage
@@ -131,6 +139,8 @@ def process_image_simple(
         image,
         enable_background_blur=enable_background_blur,
         blur_strength=blur_strength,
+        bg_model=bg_model,
+        bg_mode=bg_mode,
         enable_grain=enable_grain,
         grain_intensity=grain_intensity,
         enable_upscale=enable_upscale,

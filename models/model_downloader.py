@@ -32,7 +32,7 @@ def preload_models() -> dict:
     status = {}
     status["device"] = get_device_string()
     status["rembg"] = "Auto-downloaded by rembg package"
-    status["realesrgan"] = "Auto-downloaded by py-real-esrgan package"
+    status["realesrgan"] = "Downloaded from GitHub releases by app"
     return status
 
 

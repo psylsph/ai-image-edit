@@ -1,6 +1,6 @@
 """Pydantic models for request validation."""
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field
 from typing import Optional, List
 
 
@@ -13,6 +13,14 @@ class ProcessRequest(BaseModel):
         ge=1,
         le=50,
         description="Blur strength from 1-50"
+    )
+    bg_model: str = Field(
+        default="u2net",
+        description="Background removal model"
+    )
+    bg_mode: str = Field(
+        default="blur",
+        description="Background mode: 'blur' or 'remove'"
     )
     
     enable_grain: bool = True
@@ -31,35 +39,13 @@ class ProcessRequest(BaseModel):
         description="Upscale factor (2 or 4)"
     )
     
-    @validator('upscale_factor')
-    def validate_scale_factor(cls, v):
-        """Validate that upscale factor is 2 or 4."""
-        if v not in [1, 2, 4]:
-            raise ValueError('Upscale factor must be 1, 2, or 4')
-        return v
-    
-    @validator('blur_strength')
-    def validate_blur_strength(cls, v):
-        """Validate blur strength is reasonable."""
-        if v > 50:
-            raise ValueError('Blur strength cannot exceed 50')
-        if v < 1:
-            raise ValueError('Blur strength must be at least 1')
-        return v
-    
-    @validator('grain_intensity')
-    def validate_grain_intensity(cls, v):
-        """Validate grain intensity is in valid range."""
-        if not 0.0 <= v <= 1.0:
-            raise ValueError('Grain intensity must be between 0.0 and 1.0')
-        return v
-    
     class Config:
         """Pydantic config."""
         json_schema_extra = {
             "example": {
                 "enable_background_blur": True,
                 "blur_strength": 5,
+                "bg_model": "u2net",
                 "enable_grain": True,
                 "grain_intensity": 0.5,
                 "enable_upscale": True,
@@ -77,13 +63,6 @@ class BatchProcessRequest(BaseModel):
         description="Number of images to process (max 10)"
     )
     settings: ProcessRequest
-    
-    @validator('image_count')
-    def validate_batch_size(cls, v):
-        """Limit batch size to prevent abuse."""
-        if v > 10:
-            raise ValueError('Maximum batch size is 10 images')
-        return v
 
 
 class ProcessingStatus(BaseModel):
@@ -114,6 +93,7 @@ PRESETS = {
         settings=ProcessRequest(
             enable_background_blur=True,
             blur_strength=7,
+            bg_model="u2net_human_seg",
             enable_grain=True,
             grain_intensity=0.3,
             enable_upscale=True,

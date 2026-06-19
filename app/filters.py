@@ -102,53 +102,46 @@ def add_vignette(
     intensity: float = 0.5,
     radius: float = 0.5
 ) -> Image.Image:
-    """Add vignette effect (darkened corners).
-    
+    """Add vignette effect (darkened corners) using numpy.
+
     Args:
         image: Input PIL Image
         intensity: Vignette strength (0.0 to 1.0)
         radius: Vignette radius (0.0 to 1.0)
-    
+
     Returns:
         Image with vignette effect
     """
     if intensity <= 0:
         return image
-    
+
+    import numpy as np
+
     width, height = image.size
-    # Ensure image is in RGBA for alpha blending
     if image.mode != 'RGBA':
         image = image.convert('RGBA')
     
-    # Create vignette mask
-    mask = Image.new('L', (width, height), 0)
-    draw = ImageDraw.Draw(mask)
+    # Create normalized radial gradient using numpy (fast, no pixel loops)
+    y_coords, x_coords = np.ogrid[:height, :width]
+    center_y, center_x = height / 2.0, width / 2.0
+    max_radius = max(width, height) * 0.5 * radius
     
-    # Calculate vignette dimensions
-    center_x, center_y = width // 2, height // 2
-    max_radius = int(max(width, height) * radius)
+    # Distance from center, normalized
+    dist = np.sqrt((x_coords - center_x)**2 + (y_coords - center_y)**2)
+    dist = np.clip(dist / max_radius, 0, 1)
     
-    # Draw gradient vignette
-    for r in range(max_radius, 0, -2):
-        alpha = int(255 * (1 - (r / max_radius) ** intensity))
-        draw.ellipse(
-            [(center_x - r, center_y - r), (center_x + r, center_y + r)],
-            fill=alpha
-        )
+    # Apply intensity curve: outer pixels become fully dark, inner stay bright
+    vignette_alpha = np.clip(1.0 - np.power(dist, max(0.1, 1.0 - intensity)), 0, 1)
+    vignette_alpha = (vignette_alpha * 255).astype(np.uint8)
     
-    # Apply vignette
-    vignette_layer = Image.new('RGBA', (width, height), (0, 0, 0, 0))
-    vignette_pixels = vignette_layer.load()
-    mask_pixels = mask.load()
+    # Build vignette layer: black with alpha mask
+    vignette_layer = np.zeros((height, width, 4), dtype=np.uint8)
+    vignette_layer[:, :, 3] = 255 - vignette_alpha  # alpha: 0=transparent, 255=opaque black
     
-    for y in range(height):
-        for x in range(width):
-            alpha = mask_pixels[x, y]
-            if alpha > 0:
-                vignette_pixels[x, y] = (0, 0, 0, 255 - alpha)
+    vignette_pil = Image.fromarray(vignette_layer, mode='RGBA')
     
     # Composite vignette onto image
-    result = Image.alpha_composite(image, vignette_layer)
+    result = Image.alpha_composite(image, vignette_pil)
     
     # Convert back to original mode
     if image.mode != 'RGBA':
@@ -158,22 +151,41 @@ def add_vignette(
 
 
 def add_auto_enhance(image: Image.Image) -> Image.Image:
-    """Apply automatic enhancements to image.
-    
+    """Apply automatic enhancements to image using histogram stretching.
+
     Args:
         image: Input PIL Image
-    
+
     Returns:
         Enhanced image
     """
-    # Apply auto contrast
-    result = Image.eval(image, lambda x: 0 if x < 20 else 255 if x > 235 else x)
+    import numpy as np
+
+    # Convert to numpy
+    arr = np.array(image.convert('RGB'))
+    
+    # Stretch histogram per channel (clip 1% low/high, then scale to 0-255)
+    result = np.zeros_like(arr)
+    for c in range(3):
+        channel = arr[:, :, c]
+        low, high = np.percentile(channel, [1, 99])
+        if high > low:
+            stretched = np.clip((channel.astype(float) - low) * 255.0 / (high - low), 0, 255)
+        else:
+            stretched = channel.astype(float)
+        result[:, :, c] = stretched
+    
+    result_img = Image.fromarray(result.astype(np.uint8), mode='RGB')
+    
+    # Convert back to original mode if not RGB
+    if image.mode != 'RGB':
+        result_img = result_img.convert(image.mode)
     
     # Apply slight sharpening
-    enhancer = ImageEnhance.Sharpness(result)
-    result = enhancer.enhance(1.2)
+    enhancer = ImageEnhance.Sharpness(result_img)
+    result_img = enhancer.enhance(1.2)
     
-    return result
+    return result_img
 
 
 def apply_color_adjustments(

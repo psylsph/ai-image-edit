@@ -207,7 +207,7 @@ def test_preprocess_resizes_correctly(sample_image):
 ```
 
 ### Gradio Interface
-- Use Gradio 4.x API
+- Use Gradio 6.x API
 - Include all processing parameters as inputs
 - Return final image + intermediate debug images
 - Provide download button for results

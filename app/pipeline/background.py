@@ -5,22 +5,44 @@ from PIL import Image, ImageFilter, ImageOps
 from models.model_downloader import get_device
 
 _DEVICE = get_device()
-_SESSION = None
+_SESSIONS: dict[str, object] = {}
+
+# Available models with human-readable labels
+# Curated from rembg's 19 built-in models — niche ones (cloth seg, custom,
+# SAM) excluded.  Quality/speed tradeoffs noted for UI hint.
+BG_MODELS = {
+    "u2net":              "Auto (u2net)",
+    "u2netp":             "Fast (u2netp)",
+    "u2net_human_seg":    "People (human seg)",
+    "birefnet-portrait":  "People (BiRefNet portrait)",
+    "birefnet-general":   "BiRefNet (best)",
+    "isnet-general-use":  "IS-Net",
+    "bria-rmbg":          "BRIA RMBG",
+    "silueta":            "Silueta",
+}
 
 
 def _get_device():
     return _DEVICE
 
 
-def _load_session():
-    global _SESSION
-    if _SESSION is not None:
-        return _SESSION
+def _load_session(model_name: str = "u2net"):
+    """Load and cache a rembg session for the given model.
+
+    rembg downloads the ONNX model from the model zoo on first use,
+    so the first call for a new model will be slow.
+    """
+    if model_name not in BG_MODELS:
+        model_name = "u2net"
+
+    if model_name in _SESSIONS:
+        return _SESSIONS[model_name]
 
     try:
         from rembg import new_session
-        _SESSION = new_session("u2net")
-        return _SESSION
+        session = new_session(model_name)
+        _SESSIONS[model_name] = session
+        return session
     except ImportError as exc:
         raise ImportError(
             "rembg package not found. "
@@ -30,66 +52,72 @@ def _load_session():
 
 def process_background(
         image: Image.Image,
-        blur_strength: int = 15
+        blur_strength: int = 15,
+        model_name: str = "u2net",
+        mode: str = "blur",
 ) -> tuple[Image.Image, Image.Image]:
-    """Apply background blur using rembg for matting.
+    """Background processing — blur or remove — using rembg for matting.
 
     Args:
         image: Input PIL Image
-        blur_strength: Gaussian blur strength for background (1-50)
+        blur_strength: Gaussian blur strength for background (1-50, blur mode only)
+        model_name: rembg model to use (see BG_MODELS for options)
+        mode: "blur" = blur background keeping foreground sharp,
+              "remove" = cut out foreground with transparent background
 
     Returns:
         Tuple of (processed_image, mask_debug)
+        In "remove" mode the processed image is RGBA (transparent bg).
     """
-    if blur_strength <= 0:
-        return image, image
-
     original_size = image.size
     rgb_image = image.convert('RGB')
 
     try:
-        session = _load_session()
+        session = _load_session(model_name)
     except ImportError as exc:
         print(f"Warning: rembg not available ({exc}). Returning original image.")
         return image, image
 
     try:
         from rembg import remove
-        mask_image = remove(rgb_image, session=session)
-        mask_pil = mask_image.convert('L').resize(original_size, Image.LANCZOS)
+        cutout = remove(rgb_image, session=session)
+        cutout = cutout.convert('RGBA').resize(original_size, Image.LANCZOS)
     except Exception as exc:
         print(f"Warning: Background removal failed ({exc}). Returning original image.")
         return image, image
 
+    # ── Debug mask (always the same regardless of mode) ──
+    alpha = cutout.split()[-1]
     try:
-        mask_colored = ImageOps.autocontrast(mask_pil.convert('L')).convert('RGB')
-    except ImportError:
-        mask_colored = Image.merge('RGB', [mask_pil, mask_pil, mask_pil])
+        mask_colored = ImageOps.autocontrast(alpha.convert('L')).convert('RGB')
+    except Exception:
+        mask_colored = Image.merge('RGB', [alpha, alpha, alpha])
+
+    # ── Remove mode: just return the cutout ──
+    if mode == "remove":
+        # Feather edges slightly for a cleaner cutout
+        feathered = alpha.filter(ImageFilter.GaussianBlur(radius=1))
+        original_rgba = image.convert('RGBA')
+        # Apply feathered alpha to the original (preserves colour fidelity)
+        result = original_rgba.copy()
+        result.putalpha(feathered)
+        return result, mask_colored
+
+    # ── Blur mode ──
+    if blur_strength <= 0:
+        return image, mask_colored
 
     original_rgba = image.convert('RGBA')
-    
-    # rembg returns the image with background REMOVED (transparent)
-    # We need to use this for the sharp foreground
-    foreground_with_alpha = mask_image.convert('RGBA').resize(original_size, Image.LANCZOS)
-    
-    # Create binary mask from the alpha channel
-    alpha_channel = foreground_with_alpha.split()[-1]  # Get alpha channel
-    binary_mask = alpha_channel.point(lambda x: 255 if x > 128 else 0)
-    
-    # Feather the mask for smooth edges
+
+    # Binary mask for sharp foreground / blurred background split
+    binary_mask = alpha.point(lambda x: 255 if x > 128 else 0)
     soft_mask = binary_mask.filter(ImageFilter.GaussianBlur(radius=3))
-    
-    # Blur the entire original image (background gets blurred)
+
     blurred_image = original_rgba.filter(ImageFilter.GaussianBlur(radius=blur_strength))
-    
-    # Composite: 
-    # - Where soft_mask is 255 (foreground), use the background-removed (sharp) image
-    # - Where soft_mask is 0 (background), use the blurred image
-    result_rgba = Image.composite(foreground_with_alpha, blurred_image, soft_mask)
+    result_rgba = Image.composite(cutout, blurred_image, soft_mask)
+    result = result_rgba.convert('RGB' if image.mode == 'RGB' else image.mode)
 
-    foreground_pil = result_rgba.convert('RGB' if image.mode == 'RGB' else image.mode)
-
-    return foreground_pil, mask_colored
+    return result, mask_colored
 
 
 if __name__ == "__main__":

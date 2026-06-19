@@ -1,6 +1,6 @@
 # Multi-stage build for AI Image Editor (Enhanced)
 # Stage 1: Download Real-ESRGAN models
-FROM python:3.11-slim AS model-downloader
+FROM python:3.12-slim AS model-downloader
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
@@ -15,7 +15,7 @@ RUN wget -q -O /root/.cache/ai-image-edit/realesrgan/RealESRGAN_x4plus.pth \
     https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth
 
 # Stage 2: Final image
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 EXPOSE 8000
 EXPOSE 9090
