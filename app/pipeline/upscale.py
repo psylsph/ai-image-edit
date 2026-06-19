@@ -1,4 +1,4 @@
-"""Image upscaling using Real-ESRGAN."""
+"""Image upscaling — Real-ESRGAN or lightweight interpolation."""
 
 from pathlib import Path
 from urllib import request
@@ -17,6 +17,11 @@ _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 _MODEL_2X = None
 _MODEL_4X = None
+
+UPSCALE_MODES = {
+    "esrgan": "AI (Real-ESRGAN)",
+    "interp": "Fast (interpolation)",
+}
 
 
 def _pixel_unshuffle(x, scale):
@@ -214,12 +219,14 @@ def _prepare_input(image_rgb, scale):
     return image_array, pad_h, pad_w
 
 
-def upscale_image(image: Image.Image, scale: int = 2) -> tuple[Image.Image, Image.Image]:
-    """Upscale image using Real-ESRGAN.
+def upscale_image(image: Image.Image, scale: int = 2, mode: str = "esrgan") -> tuple[Image.Image, Image.Image]:
+    """Upscale image using Real-ESRGAN (AI) or Pillow interpolation (fast).
 
     Args:
         image: Input PIL Image
         scale: Upscaling factor (2 or 4)
+        mode: "esrgan" — Real-ESRGAN PyTorch model (quality),
+              "interp" — Pillow LANCZOS interpolation (fast)
 
     Returns:
         Tuple of (upscaled_image, debug_image)
@@ -239,26 +246,32 @@ def upscale_image(image: Image.Image, scale: int = 2) -> tuple[Image.Image, Imag
     else:
         image_rgb = image
 
-    model = _load_model(scale)
-
-    if model is None:
+    # ── Interpolation mode: Pillow LANCZOS, no model load ──
+    if mode == "interp":
         new_size = (image_rgb.width * scale, image_rgb.height * scale)
-        upscaled = image_rgb.resize(new_size, Image.Resampling.BICUBIC)
+        upscaled = image_rgb.resize(new_size, Image.Resampling.LANCZOS)
     else:
-        image_array, pad_h, pad_w = _prepare_input(image_rgb, scale)
+        # ── Real-ESRGAN mode ──
+        model = _load_model(scale)
 
-        input_tensor = (
-            torch.from_numpy(image_array).float().permute(2, 0, 1).unsqueeze(0).to(_DEVICE)
-        )
+        if model is None:
+            new_size = (image_rgb.width * scale, image_rgb.height * scale)
+            upscaled = image_rgb.resize(new_size, Image.Resampling.BICUBIC)
+        else:
+            image_array, pad_h, pad_w = _prepare_input(image_rgb, scale)
 
-        with torch.no_grad():
-            output_tensor = model(input_tensor)
+            input_tensor = (
+                torch.from_numpy(image_array).float().permute(2, 0, 1).unsqueeze(0).to(_DEVICE)
+            )
 
-        output_array = output_tensor.squeeze().permute(1, 2, 0).cpu().numpy()
-        out_h = image_rgb.height * scale - pad_h * scale
-        output_array = output_array[:out_h, :image_rgb.width * scale - pad_w * scale]
-        output_array = (output_array * 255.0).clip(0, 255).astype(np.uint8)
-        upscaled = Image.fromarray(output_array, mode='RGB')
+            with torch.no_grad():
+                output_tensor = model(input_tensor)
+
+            output_array = output_tensor.squeeze().permute(1, 2, 0).cpu().numpy()
+            out_h = image_rgb.height * scale - pad_h * scale
+            output_array = output_array[:out_h, :image_rgb.width * scale - pad_w * scale]
+            output_array = (output_array * 255.0).clip(0, 255).astype(np.uint8)
+            upscaled = Image.fromarray(output_array, mode='RGB')
 
     if original_mode == 'RGBA':
         alpha_resized = alpha_channel.resize(upscaled.size, Image.Resampling.LANCZOS)

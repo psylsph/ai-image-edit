@@ -6,6 +6,7 @@ from PIL import Image
 
 from app.pipeline import process_pipeline
 from app.pipeline.background import BG_MODELS
+from app.pipeline.upscale import UPSCALE_MODES
 from app.models import ProcessRequest, PRESETS
 from app.comparison import create_comparison_overlay, create_diff_overlay
 from app.config import settings
@@ -32,7 +33,8 @@ def validate_and_process(
     enable_grain: bool,
     grain_intensity: float,
     enable_upscale: bool,
-    upscale_factor: int
+    upscale_factor: int,
+    upscale_mode: str,
 ) -> Tuple[
     Optional[Image.Image],  # final_image
     Optional[Image.Image],  # comparison_image
@@ -55,7 +57,8 @@ def validate_and_process(
             enable_grain=enable_grain,
             grain_intensity=grain_intensity,
             enable_upscale=enable_upscale,
-            upscale_factor=upscale_factor
+            upscale_factor=upscale_factor,
+            upscale_mode=upscale_mode,
         )
 
         logger.info(f"Processing with settings: {request.model_dump()}")
@@ -70,6 +73,7 @@ def validate_and_process(
             grain_intensity=request.grain_intensity,
             enable_upscale=request.enable_upscale,
             upscale_factor=request.upscale_factor,
+            upscale_mode=request.upscale_mode,
             debug=True
         )
 
@@ -83,12 +87,13 @@ def validate_and_process(
 
         model_label = BG_MODELS.get(request.bg_model, request.bg_model)
         mode_label = "Remove (transparent)" if request.bg_mode == "remove" else "Blur"
+        up_label = UPSCALE_MODES.get(request.upscale_mode, request.upscale_mode)
         status = f"""✅ **Processing complete!**
 
 **Settings applied:**
 {'🌫️ Background: ON (' + mode_label + ', ' + model_label + ')' if request.enable_background_blur else '🌫️ Background: OFF'}
 {'🎬 Film Grain: ON (Intensity: ' + str(request.grain_intensity) + ')' if request.enable_grain else '🎬 Film Grain: OFF'}
-{'🔍 Upscaling: ON (' + str(request.upscale_factor) + 'x)' if request.enable_upscale else '🔍 Upscaling: OFF'}
+{'🔍 Upscaling: ON (' + str(request.upscale_factor) + 'x, ' + up_label + ')' if request.enable_upscale else '🔍 Upscaling: OFF'}
 
 **Output size:** {final_image.size[0]} x {final_image.size[1]} px"""
 
@@ -117,13 +122,14 @@ def apply_preset(preset_name: str) -> tuple:
         s.grain_intensity,
         s.enable_grain,
         s.enable_upscale,
-        s.upscale_factor
+        s.upscale_factor,
+        s.upscale_mode,
     )
 
 
 def reset_to_defaults() -> tuple:
     """Reset to default settings."""
-    return ("u2net", "blur", 5, 0.5, True, True, 2)
+    return ("u2net", "blur", 5, 0.5, True, True, 2, "interp")
 
 
 # ── Mobile-first CSS (Gradio 6.x compatible) ────────────────────────
@@ -499,6 +505,7 @@ def create_enhanced_ui():
                 label="Model",
                 elem_classes=["gr-dropdown"],
                 visible=True,
+                allow_custom_value=False,
             )
 
             grain = gr.Checkbox(value=True, label="🎬 Film Grain")
@@ -513,6 +520,13 @@ def create_enhanced_ui():
                 choices=["1x", "2x", "4x"], value="2x",
                 label="Scale", elem_classes=["gr-radio"],
                 visible=True
+            )
+            upscale_mode = gr.Dropdown(
+                choices=list(UPSCALE_MODES.keys()),
+                value="interp",
+                label="Mode",
+                elem_classes=["gr-dropdown"],
+                allow_custom_value=False,
             )
 
         # ── Action buttons ──
@@ -556,9 +570,9 @@ def create_enhanced_ui():
         gr.Markdown(f"""
 ### ℹ️ About
 **AI Image Editor** — mobile-optimised
-- 🌫️ Background Blur (7 rembg models)
+- 🌫️ Background Blur (8 rembg models)
 - 🎬 Luminance-aware film grain
-- 🔍 Real-ESRGAN upscaling (1×/2×/4×)
+- 🔍 Upscaling: AI (Real-ESRGAN) or Fast (interpolation)
 - Max file size: {settings.MAX_IMAGE_SIZE_MB:.0f}MB
 """, elem_classes=["gr-markdown"])
 
@@ -575,9 +589,9 @@ def create_enhanced_ui():
             outputs=grain_intensity,
         )
         upscale.change(
-            fn=lambda v: gr.update(visible=v),
+            fn=lambda v: [gr.update(visible=v), gr.update(visible=v)],
             inputs=upscale,
-            outputs=upscale_factor,
+            outputs=[upscale_factor, upscale_mode],
         )
 
         # ── Map radio "1x" / "2x" / "4x" back to int ──
@@ -585,16 +599,16 @@ def create_enhanced_ui():
             return int(val.replace("x", ""))
 
         # ── Process handler ──
-        def _process_wrapper(img, bg, bmod, bstr, bgmdl, grn, gint, up, scale_str):
+        def _process_wrapper(img, bg, bmod, bstr, bgmdl, grn, gint, up, scale_str, up_mode):
             scale = _parse_scale(scale_str)
-            return validate_and_process(img, bg, bstr, bgmdl, bmod, grn, gint, up, scale)
+            return validate_and_process(img, bg, bstr, bgmdl, bmod, grn, gint, up, scale, up_mode)
 
         process_btn.click(
             fn=_process_wrapper,
             inputs=[
                 input_image, bg_blur, bg_mode, bg_strength, bg_model,
                 grain, grain_intensity,
-                upscale, upscale_factor,
+                upscale, upscale_factor, upscale_mode,
             ],
             outputs=[
                 output_image, comparison_image, diff_image,
@@ -605,34 +619,34 @@ def create_enhanced_ui():
 
         # ── Presets ──
         def _preset_wrapper(name):
-            bg_v, bs, bgmdl, bgmod, gi, grn_en, up_en, up_sc = apply_preset(name)
+            bg_v, bs, bgmdl, bgmod, gi, grn_en, up_en, up_sc, up_sc_mode = apply_preset(name)
             return (
                 bg_v, bgmod, bs, bgmdl, gi, grn_en, up_en,
-                f"{up_sc}x" if up_sc in (1, 2, 4) else "2x"
+                f"{up_sc}x" if up_sc in (1, 2, 4) else "2x", up_sc_mode
             )
 
         portrait_btn.click(
             fn=lambda: _preset_wrapper("portrait"),
-            outputs=[bg_blur, bg_mode, bg_strength, bg_model, grain_intensity, grain, upscale, upscale_factor]
+            outputs=[bg_blur, bg_mode, bg_strength, bg_model, grain_intensity, grain, upscale, upscale_factor, upscale_mode]
         )
         landscape_btn.click(
             fn=lambda: _preset_wrapper("landscape"),
-            outputs=[bg_blur, bg_mode, bg_strength, bg_model, grain_intensity, grain, upscale, upscale_factor]
+            outputs=[bg_blur, bg_mode, bg_strength, bg_model, grain_intensity, grain, upscale, upscale_factor, upscale_mode]
         )
         vintage_btn.click(
             fn=lambda: _preset_wrapper("vintage"),
-            outputs=[bg_blur, bg_mode, bg_strength, bg_model, grain_intensity, grain, upscale, upscale_factor]
+            outputs=[bg_blur, bg_mode, bg_strength, bg_model, grain_intensity, grain, upscale, upscale_factor, upscale_mode]
         )
         minimal_btn.click(
             fn=lambda: _preset_wrapper("minimal"),
-            outputs=[bg_blur, bg_mode, bg_strength, bg_model, grain_intensity, grain, upscale, upscale_factor]
+            outputs=[bg_blur, bg_mode, bg_strength, bg_model, grain_intensity, grain, upscale, upscale_factor, upscale_mode]
         )
 
         # ── Reset ──
         reset_defaults_btn = gr.Button("🔄 Reset to Defaults", variant="secondary")
         reset_defaults_btn.click(
-            fn=lambda: (1, "blur", 5, "u2net", 0.5, True, True, "2x"),
-            outputs=[bg_blur, bg_mode, bg_strength, bg_model, grain_intensity, grain, upscale, upscale_factor]
+            fn=lambda: (1, "blur", 5, "u2net", 0.5, True, True, "2x", "interp"),
+            outputs=[bg_blur, bg_mode, bg_strength, bg_model, grain_intensity, grain, upscale, upscale_factor, upscale_mode]
         )
 
     return demo

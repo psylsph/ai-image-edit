@@ -38,6 +38,10 @@ class ProcessRequest(BaseModel):
         le=4,
         description="Upscale factor (2 or 4)"
     )
+    upscale_mode: str = Field(
+        default="esrgan",
+        description="Upscale mode: 'esrgan' or 'interp'"
+    )
     
     class Config:
         """Pydantic config."""
@@ -46,13 +50,14 @@ class ProcessRequest(BaseModel):
                 "enable_background_blur": True,
                 "blur_strength": 5,
                 "bg_model": "u2net",
+                "bg_mode": "blur",
                 "enable_grain": True,
                 "grain_intensity": 0.5,
                 "enable_upscale": True,
-                "upscale_factor": 2
+                "upscale_factor": 2,
+                "upscale_mode": "interp"
             }
         }
-
 
 class BatchProcessRequest(BaseModel):
     """Batch processing request."""
@@ -97,7 +102,8 @@ PRESETS = {
             enable_grain=True,
             grain_intensity=0.3,
             enable_upscale=True,
-            upscale_factor=2
+            upscale_factor=2,
+            upscale_mode="interp"
         )
     ),
     "landscape": PresetConfig(
@@ -109,7 +115,8 @@ PRESETS = {
             enable_grain=True,
             grain_intensity=0.5,
             enable_upscale=True,
-            upscale_factor=4
+            upscale_factor=4,
+            upscale_mode="interp"
         )
     ),
     "vintage": PresetConfig(
@@ -121,7 +128,8 @@ PRESETS = {
             enable_grain=True,
             grain_intensity=0.8,
             enable_upscale=False,
-            upscale_factor=1
+            upscale_factor=1,
+            upscale_mode="interp"
         )
     ),
     "minimal": PresetConfig(
@@ -133,7 +141,8 @@ PRESETS = {
             enable_grain=False,
             grain_intensity=0.1,
             enable_upscale=False,
-            upscale_factor=1
+            upscale_factor=1,
+            upscale_mode="interp"
         )
     )
 }

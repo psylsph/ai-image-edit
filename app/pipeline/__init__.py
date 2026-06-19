@@ -4,7 +4,7 @@ from PIL import Image
 
 from .background import process_background, BG_MODELS
 from .grain import apply_film_grain
-from .upscale import upscale_image
+from .upscale import upscale_image, UPSCALE_MODES
 
 
 def preprocess_image(image: Image.Image, max_dimension: int = 1536) -> Image.Image:
@@ -41,6 +41,7 @@ def process_pipeline(
     grain_intensity: float = 0.5,
     enable_upscale: bool = True,
     upscale_factor: int = 2,
+    upscale_mode: str = "esrgan",
     debug: bool = True
 ) -> dict:
     """Main pipeline orchestrator.
@@ -99,7 +100,7 @@ def process_pipeline(
             result['grain_only'] = current_debug_grain
 
     if enable_upscale:
-        current_image, current_debug_upscale = upscale_image(current_image, upscale_factor)
+        current_image, current_debug_upscale = upscale_image(current_image, upscale_factor, upscale_mode)
         if debug:
             result['upscale_result'] = current_image
 
@@ -117,7 +118,8 @@ def process_image_simple(
     enable_grain: bool = True,
     grain_intensity: float = 0.5,
     enable_upscale: bool = True,
-    upscale_factor: int = 2
+    upscale_factor: int = 2,
+    upscale_mode: str = "esrgan",
 ) -> Image.Image:
     """Simpler interface returning only the final image.
 
@@ -131,6 +133,7 @@ def process_image_simple(
         grain_intensity: Grain intensity (0.1-1.0)
         enable_upscale: Enable upscaling stage
         upscale_factor: Scale factor (2 or 4)
+        upscale_mode: "esrgan" or "interp"
 
     Returns:
         Final processed PIL Image
@@ -145,6 +148,7 @@ def process_image_simple(
         grain_intensity=grain_intensity,
         enable_upscale=enable_upscale,
         upscale_factor=upscale_factor,
+        upscale_mode=upscale_mode,
         debug=False
     )
     return pipeline_result['final']
